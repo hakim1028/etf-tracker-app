@@ -19,10 +19,9 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
   
-  <!-- React and Babel -->
+  <!-- React CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -37,13 +36,11 @@
       overflow-x: hidden;
     }
     
-    /* Prevent zoom on input focus (iOS) */
     input[type="text"],
     input[type="search"] {
       font-size: 16px !important;
     }
     
-    /* Hide scrollbar but keep functionality */
     ::-webkit-scrollbar {
       display: none;
     }
@@ -51,16 +48,6 @@
     * {
       -ms-overflow-style: none;
       scrollbar-width: none;
-    }
-    
-    /* iOS Safe Area */
-    @supports(padding: max(0px)) {
-      .safe-top {
-        padding-top: max(20px, env(safe-area-inset-top));
-      }
-      .safe-bottom {
-        padding-bottom: max(20px, env(safe-area-inset-bottom));
-      }
     }
   </style>
 </head>
@@ -72,33 +59,383 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
-          .then((registration) => {
-            console.log('ServiceWorker registered:', registration.scope);
-          })
-          .catch((error) => {
-            console.log('ServiceWorker registration failed:', error);
-          });
+          .catch((error) => console.log('ServiceWorker registration failed:', error));
       });
     }
-
-    // Prevent zoom on double tap (iOS)
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', (event) => {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 300) {
-        event.preventDefault();
-      }
-      lastTouchEnd = now;
-    }, false);
   </script>
 
-  <!-- React App Component -->
-  <script type="text/babel" src="etf-tracker.jsx"></script>
+  <!-- Main App Script -->
+  <script>
+    const { useState, useEffect } = React;
+    const e = React.createElement;
 
-  <!-- Initialize App -->
-  <script type="text/babel">
+    // Lucide Icons as simple SVG components
+    const TrendingUp = () => e('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('polyline', { points: '23 6 13.5 15.5 8.5 10.5 1 18' }),
+      e('polyline', { points: '17 6 23 6 23 12' })
+    );
+
+    const TrendingDown = () => e('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('polyline', { points: '23 18 13.5 8.5 8.5 13.5 1 6' }),
+      e('polyline', { points: '17 18 23 18 23 12' })
+    );
+
+    const RefreshCw = () => e('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('polyline', { points: '23 4 23 10 17 10' }),
+      e('polyline', { points: '1 20 1 14 7 14' }),
+      e('path', { d: 'M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15' })
+    );
+
+    const Search = () => e('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('circle', { cx: 11, cy: 11, r: 8 }),
+      e('path', { d: 'm21 21-4.35-4.35' })
+    );
+
+    const ArrowUpDown = () => e('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('path', { d: 'm21 16-4 4-4-4' }),
+      e('path', { d: 'M17 20V4' }),
+      e('path', { d: 'm3 8 4-4 4 4' }),
+      e('path', { d: 'M7 4v16' })
+    );
+
+    const X = () => e('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 },
+      e('line', { x1: 18, y1: 6, x2: 6, y2: 18 }),
+      e('line', { x1: 6, y1: 6, x2: 18, y2: 18 })
+    );
+
+    function LeveragedETFTracker() {
+      const [etfs, setEtfs] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [searchTerm, setSearchTerm] = useState('');
+      const [sortConfig, setSortConfig] = useState({ key: 'ticker', direction: 'asc' });
+      const [error, setError] = useState(null);
+      const [selectedETF, setSelectedETF] = useState(null);
+
+      const YAHOO_API = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+      
+      const allETFs = [
+        'TQQQ', 'SOXL', 'TECL', 'UPRO', 'SPXL', 'UDOW', 'TNA', 'URTY', 'MIDU', 'UMDD',
+        'FAS', 'DPST', 'BNKU', 'ERX', 'GUSH', 'NRGU', 'CURE', 'LABU', 'PILL', 'DUSL',
+        'NAIL', 'DRN', 'UTSL', 'WANT', 'RETL', 'YINN', 'CWEB', 'CQQQ', 'INDL', 'MEXX',
+        'FNGU', 'BULZ', 'WEBL', 'HIBL', 'DFEN', 'TPOR', 'ZBIO',
+        'SQQQ', 'SOXS', 'TECS', 'SPXU', 'SDOW', 'TZA', 'SRTY', 'MIDZ', 'FAZ', 'ERY',
+        'NRGD', 'DRIP', 'LABD', 'DRV', 'YANG', 'FNGD', 'BERZ', 'WEBS', 'HIBS', 'TAWK',
+        'QLD', 'SSO', 'DDM', 'UWM', 'MVV', 'SAA', 'UYG', 'UGE', 'UPW', 'UCC',
+        'UXI', 'ROM', 'USD', 'RXL', 'UYM', 'URE', 'DIG', 'UCO', 'UGL', 'AGQ',
+        'BOIL', 'UGA', 'USL', 'BOM', 'UBG', 'EET', 'LTL', 'EZJ', 'UBR', 'UPV',
+        'UBT', 'UST', 'UBM', 'UJB',
+        'QID', 'SDS', 'DXD', 'TWM', 'MZZ', 'SDD', 'SKF', 'SDP', 'SCC', 'SIJ',
+        'SJB', 'SZK', 'REK', 'RWM', 'SBB', 'SBM', 'SJL', 'SRS', 'SEF', 'SMN',
+        'SZO', 'SJH', 'ZSL', 'CMD', 'KOLD', 'SCO', 'GLL', 'PST', 'TBT', 'TBF',
+        'SSG', 'RXD', 'DUG', 'EEV', 'BZQ', 'EWV', 'EPV',
+        'SPXS',
+        'NVDL', 'CONL', 'AMDL', 'AAPU', 'GGLL', 'PTIR', 'PLTU', 'SMCX',
+        'URAX', 'RGTX', 'IONX', 'OKLL', 'SOUX', 'DKNX', 'CVNX', 'ORCX', 'RIOX', 'AVGX',
+        'AVGU', 'NVOX', 'SOFX', 'HIMZ', 'VSTL', 'ANEL', 'OSCX', 'JPX', 'MSOX',
+        'MUL', 'TSMW', 'CRWU', 'PLTL', 'UBERL',
+        'NVD', 'NVDS', 'NVDD', 'TSLS', 'CONS', 'AMDD', 'AAPD', 'GGLS', 'PTID', 'PLTD',
+        'MSOD', 'URAD', 'DAMD', 'PLTZ', 'SMCZ', 'RGTZ', 'IONZ', 'OKLS', 'BMNZ', 'HOOZ',
+        'RKLZ', 'LLYZ', 'STSM',
+        'NVDX', 'NVDU',
+        'TSLL', 'TSLA', 'MSTX', 'MSTU',
+        'SMCI', 'HOOX', 'RKLX', 'MST', 'HIMY', 'AMDU', 'PLT', 'SMCC', 'ETHI', 'HOOI', 'ETRL', 'BULX',
+        'SMST', 'QBTZ',
+        'TARK', 'SARK', 'TSLQ',
+        'SHNY', 'GDXU', 'GDXD', 'WTID', 'SMDD', 'SBIO', 'IWMD',
+        'UVXY', 'SVXY', 'VIXY', 'VXX', 'VIXM', 'SVIX', 'TVIZ', 'UVIX', 'VIIX', 'ZIV', 'VMIN',
+        'SPYU',
+        'TMF', 'TYD', 'TMV', 'TYO', 'TTT',
+        'PST', 'TBT', 'TBF',
+        'UUP', 'EUO', 'YCL', 'UDN', 'ULE', 'YCS', 'UYN', 'BZF', 'CYB', 'GBB',
+        'BITU', 'BITI', 'CONL', 'CONS', 'ETHD', 'ETHI', 'UBG', 'BITO', 'BITX', 'CONQ',
+        'CORN', 'WEAT', 'SOYB', 'CANE', 'JO', 'JJC', 'NIB', 'COW', 'PALL', 'PPLT',
+        'HXU.TO', 'HQU.TO', 'HSU.TO', 'HFU.TO', 'HEU.TO', 'HMU.TO', 'HIU.TO', 'HRU.TO',
+        'HOU', 'HNU', 'HGU.TO', 'HSL.TO', 'HBU.TO', 'HMMJ.TO',
+        'HXD.TO', 'HQD.TO', 'HSD.TO', 'HFD.TO', 'HED.TO', 'HMD.TO', 'HID.TO', 'HRD.TO',
+        'HOD', 'HND', 'HGD.TO', 'HZD.TO', 'HBD.TO', 'HMJI.TO',
+        'HXUL.TO', 'HQUL.TO', 'HSUL.TO',
+        'HXDL.TO', 'HQDL.TO', 'HSDL.TO',
+        'HIX.TO',
+        'VIXC.TO',
+      ];
+
+      const getType = (ticker) => {
+        const bearPatterns = ['SQQQ', 'SOXS', 'SPXU', 'SDOW', 'TZA', 'SRTY', 'FAZ', 'ERY', 'DRIP', 'DRV', 'YANG', 'FNGD', 'BERZ', 'WEBS', 'HIBS', 'TAWK', 'QID', 'SDS', 'DXD', 'TWM', 'MZZ', 'SKF', 'SDP', 'REK', 'RWM', 'SRS', 'SMN', 'ZSL', 'KOLD', 'SCO', 'GLL', 'PST', 'TBT', 'SPXS', 'NVD', 'NVDS', 'NVDD', 'TSLS', 'CONS', 'AMDD', 'AAPD', 'GGLS', 'PTID', 'PLTD', 'MSOD', 'URAD', 'DAMD', 'PLTZ', 'SMCZ', 'RGTZ', 'IONZ', 'OKLS', 'BMNZ', 'HOOZ', 'RKLZ', 'LLYZ', 'STSM', 'SMST', 'QBTZ', 'SARK', 'TSLQ', 'SVXY', 'BITI', 'TMV', 'TYO', 'TBF'];
+        const bearSuffixes = ['D.TO', 'S'];
+        
+        if (bearPatterns.includes(ticker)) return 'Bear';
+        if (bearSuffixes.some(suffix => ticker.endsWith(suffix))) return 'Bear';
+        return 'Bull';
+      };
+
+      const getETFName = (ticker) => {
+        const names = {
+          'TQQQ': '3x Nasdaq-100 Bull',
+          'SQQQ': '3x Nasdaq-100 Bear',
+          'SOXL': '3x Semiconductors Bull',
+          'NVDL': '2x NVIDIA Bull',
+          'TSLL': '2x Tesla Bull',
+          'UPRO': '3x S&P 500 Bull',
+          'SPYU': '4x S&P 500 Bull',
+          'MST': '2x MicroStrategy Bull',
+          'TARK': '2x ARKK Bull',
+          'SARK': '-1x ARKK Bear',
+          'HXU.TO': '2x S&P/TSX 60 Bull',
+          'HQUL.TO': '3x NASDAQ-100 Bull',
+        };
+        return names[ticker] || ticker;
+      };
+
+      const fetchRealETFData = async (ticker) => {
+        try {
+          const response = await fetch(`${YAHOO_API}${ticker}?range=1y&interval=1d`);
+          if (!response.ok) return null;
+          
+          const data = await response.json();
+          const result = data.chart.result[0];
+          if (!result?.timestamp || !result?.indicators?.quote[0]?.close) return null;
+
+          const timestamps = result.timestamp;
+          const closes = result.indicators.quote[0].close;
+          const validPrices = closes.map((price, idx) => ({ price, timestamp: timestamps[idx] })).filter(item => item.price !== null);
+
+          if (validPrices.length < 10) return null;
+
+          const latestPrice = validPrices[validPrices.length - 1].price;
+          const yesterdayPrice = validPrices[validPrices.length - 2]?.price;
+          const fiveDaysPrice = validPrices[validPrices.length - 6]?.price;
+          const oneMonthPrice = validPrices[validPrices.length - 22]?.price;
+          const threeMonthPrice = validPrices[validPrices.length - 64]?.price;
+          const oneYearPrice = validPrices[0]?.price;
+
+          const calculateReturn = (oldPrice, newPrice) => {
+            if (!oldPrice || !newPrice) return 0;
+            return ((newPrice - oldPrice) / oldPrice) * 100;
+          };
+
+          return {
+            ticker,
+            type: getType(ticker),
+            name: getETFName(ticker),
+            today: calculateReturn(yesterdayPrice, latestPrice),
+            '1y': calculateReturn(oneYearPrice, latestPrice),
+            '3m': calculateReturn(threeMonthPrice, latestPrice),
+            '1m': calculateReturn(oneMonthPrice, latestPrice),
+            '5d': calculateReturn(fiveDaysPrice, latestPrice),
+          };
+        } catch (err) {
+          return null;
+        }
+      };
+
+      const fetchETFData = async () => {
+        setLoading(true);
+        setError(null);
+        
+        try {
+          const batchSize = 10;
+          const results = [];
+          
+          for (let i = 0; i < allETFs.length; i += batchSize) {
+            const batch = allETFs.slice(i, i + batchSize);
+            const batchPromises = batch.map(ticker => fetchRealETFData(ticker));
+            const batchResults = await Promise.all(batchPromises);
+            
+            batchResults.forEach(result => {
+              if (result) results.push(result);
+            });
+            
+            setEtfs([...results]);
+            
+            if (i + batchSize < allETFs.length) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+          
+          setLoading(false);
+          if (results.length === 0) setError('Unable to fetch data. Please try again.');
+        } catch (err) {
+          setError('Failed to load data. Please try again.');
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchETFData();
+        const interval = setInterval(fetchETFData, 15000);
+        return () => clearInterval(interval);
+      }, []);
+
+      const handleSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+        setSortConfig({ key, direction });
+      };
+
+      const getSortedData = () => {
+        const filtered = etfs.filter(etf => 
+          etf.ticker.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (etf.name && etf.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
+
+        return filtered.sort((a, b) => {
+          let aVal = a[sortConfig.key];
+          let bVal = b[sortConfig.key];
+          
+          if (typeof aVal === 'string') {
+            aVal = aVal.toLowerCase();
+            bVal = bVal.toLowerCase();
+          }
+          
+          if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
+        });
+      };
+
+      const formatPercent = (value) => {
+        if (value === null || value === undefined || isNaN(value)) return '-';
+        return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+      };
+
+      const sortedData = getSortedData();
+
+      return e('div', { className: 'min-h-screen flex items-center justify-center p-4' },
+        e('div', { 
+          className: 'relative w-[390px] h-[844px] bg-black rounded-[40px] shadow-2xl overflow-hidden',
+          style: { border: '12px solid #1a1a1a' }
+        },
+          e('div', { className: 'absolute top-0 left-1/2 transform -translate-x-1/2 w-[150px] h-[30px] bg-black rounded-b-3xl z-50' }),
+          e('div', { className: 'h-full bg-gradient-to-br from-slate-900 to-slate-800 overflow-y-auto pb-8' },
+            e('div', { className: 'p-4' },
+              e('div', { className: 'flex items-center justify-between mb-4' },
+                e('h1', { className: 'text-2xl font-bold text-white flex items-center gap-2' },
+                  e(TrendingUp),
+                  'ETF Tracker'
+                ),
+                e('button', {
+                  onClick: fetchETFData,
+                  disabled: loading,
+                  className: 'p-2 bg-indigo-500 rounded-lg hover:bg-indigo-600 disabled:opacity-50'
+                },
+                  e(RefreshCw, { className: loading ? 'animate-spin' : '' })
+                )
+              ),
+              e('div', { className: 'mb-4 relative' },
+                e('input', {
+                  type: 'text',
+                  placeholder: 'Search ETF...',
+                  value: searchTerm,
+                  onChange: (ev) => setSearchTerm(ev.target.value),
+                  className: 'w-full px-10 py-2 bg-slate-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500'
+                }),
+                e('div', { className: 'absolute left-3 top-2.5 text-gray-400' }, e(Search))
+              ),
+              e('div', { className: 'text-sm text-gray-400 mb-4' },
+                loading ? 'Loading...' : `${sortedData.length} ETFs • Yahoo Finance (Real-Time)`
+              ),
+              e('div', { className: 'bg-slate-800 rounded-lg overflow-hidden' },
+                e('div', { className: 'overflow-x-auto' },
+                  e('table', { className: 'w-full' },
+                    e('thead', { className: 'bg-slate-700 text-gray-300 text-xs' },
+                      e('tr', {},
+                        ['ticker', 'type', 'name', 'today', '1y', '3m', '1m', '5d'].map(key => 
+                          e('th', {
+                            key: key,
+                            onClick: () => handleSort(key),
+                            className: 'px-2 py-2 cursor-pointer hover:bg-slate-600'
+                          },
+                            e('div', { className: 'flex items-center gap-1 justify-center' },
+                              key.charAt(0).toUpperCase() + key.slice(1),
+                              e(ArrowUpDown)
+                            )
+                          )
+                        )
+                      )
+                    ),
+                    e('tbody', { className: 'text-sm' },
+                      sortedData.map(etf => 
+                        e('tr', {
+                          key: etf.ticker,
+                          onClick: () => setSelectedETF(etf),
+                          className: 'border-t border-slate-700 hover:bg-slate-700 cursor-pointer'
+                        },
+                          e('td', { className: 'px-2 py-2 font-mono font-bold text-indigo-400' }, etf.ticker),
+                          e('td', { className: 'px-2 py-2' },
+                            e('span', {
+                              className: `px-2 py-0.5 rounded text-xs ${
+                                etf.type === 'Bull' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                              }`
+                            }, etf.type)
+                          ),
+                          e('td', { className: 'px-2 py-2 text-gray-300 text-xs truncate max-w-[100px]' }, etf.name || '-'),
+                          ['today', '1y', '3m', '1m', '5d'].map(period => {
+                            const value = etf[period];
+                            const isPositive = value >= 0;
+                            return e('td', {
+                              key: period,
+                              className: `px-2 py-2 text-[10px] ${isPositive ? 'text-green-400' : 'text-red-400'}`
+                            }, formatPercent(value));
+                          })
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          ),
+          selectedETF && e('div', {
+            className: 'absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-50',
+            onClick: () => setSelectedETF(null)
+          },
+            e('div', {
+              className: 'bg-slate-800 rounded-lg p-6 max-w-sm w-full',
+              onClick: (ev) => ev.stopPropagation()
+            },
+              e('div', { className: 'flex items-center justify-between mb-4' },
+                e('div', {},
+                  e('h2', { className: 'text-2xl font-bold text-white' }, selectedETF.ticker),
+                  e('span', {
+                    className: `text-sm px-2 py-1 rounded mt-1 inline-block ${
+                      selectedETF.type === 'Bull' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                    }`
+                  }, selectedETF.type)
+                ),
+                e('button', {
+                  onClick: () => setSelectedETF(null),
+                  className: 'text-gray-400 hover:text-white'
+                }, e(X))
+              ),
+              e('p', { className: 'text-gray-300 mb-4' }, selectedETF.name),
+              e('div', { className: 'grid grid-cols-2 gap-3' },
+                [
+                  { label: 'Today', value: selectedETF.today },
+                  { label: '5 Days', value: selectedETF['5d'] },
+                  { label: '1 Month', value: selectedETF['1m'] },
+                  { label: '3 Months', value: selectedETF['3m'] },
+                  { label: '1 Year', value: selectedETF['1y'] }
+                ].map(({ label, value }) => {
+                  const isPositive = value >= 0;
+                  return e('div', {
+                    key: label,
+                    className: 'bg-slate-700 p-3 rounded'
+                  },
+                    e('div', { className: 'text-xs text-gray-400 mb-1' }, label),
+                    e('div', {
+                      className: `text-lg font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`
+                    }, formatPercent(value))
+                  );
+                })
+              )
+            )
+          )
+        )
+      );
+    }
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<LeveragedETFTracker />);
+    root.render(e(LeveragedETFTracker));
   </script>
 </body>
 </html>

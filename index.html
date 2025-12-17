@@ -110,8 +110,6 @@
       const [sortConfig, setSortConfig] = useState({ key: 'ticker', direction: 'asc' });
       const [error, setError] = useState(null);
       const [selectedETF, setSelectedETF] = useState(null);
-
-      const YAHOO_API = 'https://query1.finance.yahoo.com/v8/finance/chart/';
       
       const allETFs = [
         'TQQQ', 'SOXL', 'TECL', 'UPRO', 'SPXL', 'UDOW', 'TNA', 'URTY', 'MIDU', 'UMDD',
@@ -188,42 +186,33 @@
 
       const fetchRealETFData = async (ticker) => {
         try {
-          const response = await fetch(`${YAHOO_API}${ticker}?range=1y&interval=1d`);
-          if (!response.ok) return null;
+          // Call our backend API instead of Yahoo Finance directly
+          const response = await fetch(`/api/etf-data?ticker=${ticker}`);
+          
+          if (!response.ok) {
+            console.log(`Failed to fetch ${ticker}`);
+            return null;
+          }
           
           const data = await response.json();
-          const result = data.chart.result[0];
-          if (!result?.timestamp || !result?.indicators?.quote[0]?.close) return null;
-
-          const timestamps = result.timestamp;
-          const closes = result.indicators.quote[0].close;
-          const validPrices = closes.map((price, idx) => ({ price, timestamp: timestamps[idx] })).filter(item => item.price !== null);
-
-          if (validPrices.length < 10) return null;
-
-          const latestPrice = validPrices[validPrices.length - 1].price;
-          const yesterdayPrice = validPrices[validPrices.length - 2]?.price;
-          const fiveDaysPrice = validPrices[validPrices.length - 6]?.price;
-          const oneMonthPrice = validPrices[validPrices.length - 22]?.price;
-          const threeMonthPrice = validPrices[validPrices.length - 64]?.price;
-          const oneYearPrice = validPrices[0]?.price;
-
-          const calculateReturn = (oldPrice, newPrice) => {
-            if (!oldPrice || !newPrice) return 0;
-            return ((newPrice - oldPrice) / oldPrice) * 100;
-          };
+          
+          if (data.error) {
+            console.log(`Error for ${ticker}:`, data.error);
+            return null;
+          }
 
           return {
             ticker,
             type: getType(ticker),
             name: getETFName(ticker),
-            today: calculateReturn(yesterdayPrice, latestPrice),
-            '1y': calculateReturn(oneYearPrice, latestPrice),
-            '3m': calculateReturn(threeMonthPrice, latestPrice),
-            '1m': calculateReturn(oneMonthPrice, latestPrice),
-            '5d': calculateReturn(fiveDaysPrice, latestPrice),
+            today: data.today,
+            '1y': data['1y'],
+            '3m': data['3m'],
+            '1m': data['1m'],
+            '5d': data['5d'],
           };
         } catch (err) {
+          console.error(`Error fetching ${ticker}:`, err.message);
           return null;
         }
       };
